@@ -333,7 +333,7 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 					}
 
 					try {
-						$handle = $this->objectStore->readObject($this->getURN($stat['fileid']));
+						$handle = $this->objectStore->readObject($this->getURN($stat['oid']));
 						if ($handle === false) {
 							return false; // keep backward compatibility
 						}
@@ -346,13 +346,13 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 					} catch (NotFoundException $e) {
 						$this->logger->logException($e, [
 							'app' => 'objectstore',
-							'message' => 'Could not get object ' . $this->getURN($stat['fileid']) . ' for file ' . $path,
+							'message' => 'Could not get object ' . $this->getURN($stat['oid']) . ' for file ' . $path,
 						]);
 						throw $e;
 					} catch (\Exception $ex) {
 						$this->logger->logException($ex, [
 							'app' => 'objectstore',
-							'message' => 'Could not get object ' . $this->getURN($stat['fileid']) . ' for file ' . $path,
+							'message' => 'Could not get object ' . $this->getURN($stat['oid']) . ' for file ' . $path,
 						]);
 						return false;
 					}

@@ -195,6 +195,7 @@ class Cache implements ICache {
 		$data['name'] = (string)$data['name'];
 		$data['path'] = (string)$data['path'];
 		$data['fileid'] = (int)$data['fileid'];
+		$data['oid'] = (int)$data['oid'];
 		$data['parent'] = (int)$data['parent'];
 		$data['size'] = Util::numericToNumber($data['size']);
 		$data['unencrypted_size'] = Util::numericToNumber($data['unencrypted_size'] ?? 0);
@@ -321,6 +322,9 @@ class Cache implements ICache {
 
 			if ($builder->execute()) {
 				$fileId = $builder->getLastInsertId();
+
+				$data['oid'] = $fileId;
+				$this->update($fileId, $data);
 
 				if (count($extensionValues)) {
 					$query = $this->getQueryBuilder();

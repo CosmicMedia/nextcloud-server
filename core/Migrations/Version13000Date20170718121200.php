@@ -182,6 +182,10 @@ class Version13000Date20170718121200 extends SimpleMigrationStep {
 				'notnull' => true,
 				'length' => 20,
 			]);
+			$table->addColumn('oid', Types::BIGINT, [
+				'notnull' => false,
+				'length' => 20,
+			]);
 			$table->addColumn('storage', Types::BIGINT, [
 				'notnull' => true,
 				'length' => 20,
