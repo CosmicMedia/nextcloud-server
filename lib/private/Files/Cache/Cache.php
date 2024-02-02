@@ -444,7 +444,7 @@ class Cache implements ICache {
 	 */
 	protected function normalizeData(array $data): array {
 		$fields = [
-			'path', 'parent', 'name', 'mimetype', 'size', 'mtime', 'storage_mtime', 'encrypted',
+			'oid', 'path', 'parent', 'name', 'mimetype', 'size', 'mtime', 'storage_mtime', 'encrypted',
 			'etag', 'permissions', 'checksum', 'storage', 'unencrypted_size'];
 		$extensionFields = ['metadata_etag', 'creation_time', 'upload_time'];
 
@@ -922,20 +922,43 @@ class Cache implements ICache {
 		if (is_null($entry) || !isset($entry['fileid'])) {
 			$entry = $this->get($path);
 		}
+
+		$rows = [];
+
 		if (isset($entry['mimetype']) && $entry['mimetype'] === FileInfo::MIMETYPE_FOLDER) {
 			$id = $entry['fileid'];
+			$storageId = $entry['storage'];
 
-			$query = $this->getQueryBuilder();
-			$query->select('size', 'unencrypted_size')
-				->from('filecache')
-				->whereParent($id);
-			if ($ignoreUnknown) {
-				$query->andWhere($query->expr()->gte('size', $query->createNamedParameter(0)));
+			if ($path === 'files') {
+				$query = $this->connection->executeQuery('
+					SELECT oc_filecache.fileid, SUM(oc_filecache.size / ref_count) AS size, SUM(oc_filecache.size / ref_count) AS unencrypted_size
+					FROM oc_filecache
+					JOIN (
+						SELECT oid, COUNT(oid) AS ref_count
+						FROM oc_filecache
+						WHERE oid IS NOT NULL
+						GROUP BY oc_filecache.oid
+					) AS subquery ON oc_filecache.oid = subquery.oid
+					WHERE oc_filecache.storage = ? AND mimetype != 2
+					GROUP BY oc_filecache.fileid;
+				', [$storageId, $storageId]);
+
+				$rows = $query->fetchAll();
+				$query->closeCursor();
+
+			} else {
+				$query = $this->getQueryBuilder();
+				$query->select('size', 'unencrypted_size')
+					->from('filecache')
+					->whereParent($id);
+				if ($ignoreUnknown) {
+					$query->andWhere($query->expr()->gte('size', $query->createNamedParameter(0)));
+				}
+
+				$result = $query->execute();
+				$rows = $result->fetchAll();
+				$result->closeCursor();
 			}
-
-			$result = $query->execute();
-			$rows = $result->fetchAll();
-			$result->closeCursor();
 
 			if ($rows) {
 				$sizes = array_map(function (array $row) {
