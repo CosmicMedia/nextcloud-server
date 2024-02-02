@@ -931,7 +931,7 @@ class Cache implements ICache {
 
 			if ($path === 'files') {
 				$query = $this->connection->executeQuery('
-					SELECT oc_filecache.fileid, SUM(oc_filecache.size / ref_count) AS size, SUM(oc_filecache.size / ref_count) AS unencrypted_size
+					SELECT oc_filecache.fileid, SUM(oc_filecache.size / ref_count) AS size
 					FROM oc_filecache
 					JOIN (
 						SELECT oid, COUNT(oid) AS ref_count
@@ -941,7 +941,7 @@ class Cache implements ICache {
 					) AS subquery ON oc_filecache.oid = subquery.oid
 					WHERE oc_filecache.storage = ? AND mimetype != 2
 					GROUP BY oc_filecache.fileid;
-				', [$storageId, $storageId]);
+				', [$storageId]);
 
 				$rows = $query->fetchAll();
 				$query->closeCursor();
