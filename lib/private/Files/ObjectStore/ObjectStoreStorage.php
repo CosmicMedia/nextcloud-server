@@ -95,6 +95,26 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 		$this->logger = \OC::$server->getLogger();
 	}
 
+	public function getETag($path) {
+		$path = $this->normalizePath($path);
+		$stat = $this->stat($path);
+
+		$objectStore = $this->getObjectStore();
+
+		if (isset($stat['oid']) && $objectStore instanceof \OC\Files\ObjectStore\S3) {
+			$urn = $this->getURN($stat['oid']);
+			$etag = $objectStore->getConnection()->headObject([
+				'Bucket' => $objectStore->getBucket(),
+				'Key' => $urn,
+			])->get('ETag');
+			$etag = str_replace('"', '', $etag);
+			
+			return $etag;
+		}
+
+		return parent::getETag($path);
+	}
+
 	public function mkdir($path, bool $force = false) {
 		$path = $this->normalizePath($path);
 		if (!$force && $this->file_exists($path)) {
@@ -573,6 +593,9 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 				throw new \Exception("Object not found after writing (urn: $urn, path: $path)", 404);
 			}
 		}
+
+		$stat['etag'] = $this->getETag($path);
+		$this->getCache()->update($fileId, $stat);
 
 		return $size;
 	}
