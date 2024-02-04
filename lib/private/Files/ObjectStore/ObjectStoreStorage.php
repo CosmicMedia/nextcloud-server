@@ -47,6 +47,8 @@ use OCP\Files\ObjectStore\IObjectStore;
 use OCP\Files\ObjectStore\IObjectStoreMultiPartUpload;
 use OCP\Files\Storage\IChunkedFileWrite;
 use OCP\Files\Storage\IStorage;
+use OCP\DB\QueryBuilder\IQueryBuilder;
+use OCP\IDBConnection;
 
 class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFileWrite {
 	use CopyDirectory;
@@ -55,6 +57,10 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 	 * @var \OCP\Files\ObjectStore\IObjectStore $objectStore
 	 */
 	protected $objectStore;
+	/**
+	 * @var IDBConnection
+	 */
+	protected $db;
 	/**
 	 * @var string $id
 	 */
@@ -93,6 +99,7 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 		$this->handleCopiesAsOwned = (bool)($params['handleCopiesAsOwned'] ?? false);
 
 		$this->logger = \OC::$server->getLogger();
+		$this->db = \OC::$server->getDatabaseConnection();
 	}
 
 	public function getETag($path) {
@@ -244,13 +251,36 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 	}
 
 	public function rmObject(ICacheEntry $entry): bool {
+		$id = null;
 		try {
-			$this->objectStore->deleteObject($this->getURN($entry->getId()));
+			if ($entry instanceof CacheEntry) {
+				$data = $entry->getData();
+
+				$id = $data['oid'];
+
+				$qb = $this->db->getQueryBuilder();
+				$select = $qb->select($qb->createFunction('COUNT(oid)'))
+					->from('filecache')
+					->where($qb->expr()->eq('oid', $qb->createNamedParameter($id)));
+				
+				$result = $select->execute();
+				$count = $result->fetchOne();
+				$result->closeCursor();
+
+				if ($count !== false) { $count = (int)$count; } else { $count = 0; }
+				//Only delete object if count is less than or equal to one.
+				if ($count <= 1) {
+					$this->objectStore->deleteObject($this->getURN($id));
+				}
+			} else {
+				$id = $entry->getId();
+				$this->objectStore->deleteObject($this->getURN($id));
+			}
 		} catch (\Exception $ex) {
 			if ($ex->getCode() !== 404) {
 				$this->logger->logException($ex, [
 					'app' => 'objectstore',
-					'message' => 'Could not delete object ' . $this->getURN($entry->getId()) . ' for ' . $entry->getPath(),
+					'message' => 'Could not delete object ' . $this->getURN($id) . ' for ' . $entry->getPath(),
 				]);
 				return false;
 			}

@@ -931,16 +931,24 @@ class Cache implements ICache {
 
 			if ($path === 'files') {
 				$query = $this->connection->executeQuery('
-					SELECT oc_filecache.fileid, SUM(oc_filecache.size / ref_count) AS size
-					FROM oc_filecache
-					JOIN (
+					WITH RECURSIVE FileHierarchy AS (
+						SELECT fileid, size, unencrypted_size, parent, mimetype, 1 as ref_count
+						FROM oc_filecache
+						WHERE fileid = ?
+			
+						UNION ALL
+			
+						SELECT fc.fileid, (fc.size / subquery.ref_count) AS size, (fc.unencrypted_size / subquery.ref_count) AS unencrypted_size, fc.parent, fc.mimetype, subquery.ref_count
+						FROM oc_filecache fc
+						JOIN FileHierarchy fh ON fc.parent = fh.fileid
+						JOIN (
 						SELECT oid, COUNT(oid) AS ref_count
 						FROM oc_filecache
 						WHERE oid IS NOT NULL
 						GROUP BY oc_filecache.oid
-					) AS subquery ON oc_filecache.oid = subquery.oid
-					WHERE oc_filecache.storage = ? AND mimetype != 2
-					GROUP BY oc_filecache.fileid;
+						) AS subquery ON fc.oid = subquery.oid
+					)
+					SELECT * FROM FileHierarchy WHERE mimetype != 2;
 				', [$storageId]);
 
 				$rows = $query->fetchAll();
