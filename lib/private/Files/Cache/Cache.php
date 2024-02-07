@@ -927,7 +927,6 @@ class Cache implements ICache {
 
 		if (isset($entry['mimetype']) && $entry['mimetype'] === FileInfo::MIMETYPE_FOLDER) {
 			$id = $entry['fileid'];
-			$storageId = $entry['storage'];
 
 			if ($path === 'files') {
 				$query = $this->connection->executeQuery('
@@ -949,7 +948,7 @@ class Cache implements ICache {
 						) AS subquery ON fc.oid = subquery.oid
 					)
 					SELECT * FROM FileHierarchy WHERE mimetype != 2;
-				', [$storageId]);
+				', [$id]);
 
 				$rows = $query->fetchAll();
 				$query->closeCursor();
