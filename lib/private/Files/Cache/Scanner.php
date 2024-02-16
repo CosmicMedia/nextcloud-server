@@ -200,6 +200,14 @@ class Scanner extends BasicEmitter implements IScanner {
 					if ($cacheData && $reuseExisting && isset($cacheData['fileid'])) {
 						// prevent empty etag
 						$etag = empty($cacheData['etag']) ? $data['etag'] : $cacheData['etag'];
+
+						if ($this->storage instanceof \OC\Files\ObjectStore\ObjectStoreStorage) {
+							//TODO Find duplicates with etag.
+
+							//TODO delete S3 object if duplicate is found.
+							// $this->storage->rmObject($cacheData);
+						}
+
 						$fileId = $cacheData['fileid'];
 						$data['fileid'] = $fileId;
 						// only reuse data if the file hasn't explicitly changed

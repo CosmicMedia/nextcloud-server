@@ -187,6 +187,7 @@ class Cache implements ICache {
 		$data['name'] = (string)$data['name'];
 		$data['path'] = (string)$data['path'];
 		$data['fileid'] = (int)$data['fileid'];
+		$data['oid'] = (int)$data['oid'];
 		$data['parent'] = (int)$data['parent'];
 		$data['size'] = Util::numericToNumber($data['size']);
 		$data['unencrypted_size'] = Util::numericToNumber($data['unencrypted_size'] ?? 0);
@@ -314,6 +315,9 @@ class Cache implements ICache {
 			if ($builder->execute()) {
 				$fileId = $builder->getLastInsertId();
 
+				$data['oid'] = $fileId;
+				$this->update($fileId, $data);
+
 				if (count($extensionValues)) {
 					$query = $this->getQueryBuilder();
 					$query->insert('filecache_extended');
@@ -432,7 +436,7 @@ class Cache implements ICache {
 	 */
 	protected function normalizeData(array $data): array {
 		$fields = [
-			'path', 'parent', 'name', 'mimetype', 'size', 'mtime', 'storage_mtime', 'encrypted',
+			'oid', 'path', 'parent', 'name', 'mimetype', 'size', 'mtime', 'storage_mtime', 'encrypted',
 			'etag', 'permissions', 'checksum', 'storage', 'unencrypted_size'];
 		$extensionFields = ['metadata_etag', 'creation_time', 'upload_time'];
 
@@ -910,20 +914,50 @@ class Cache implements ICache {
 		if (is_null($entry) || !isset($entry['fileid'])) {
 			$entry = $this->get($path);
 		}
+
+		$rows = [];
+
 		if (isset($entry['mimetype']) && $entry['mimetype'] === FileInfo::MIMETYPE_FOLDER) {
 			$id = $entry['fileid'];
 
-			$query = $this->getQueryBuilder();
-			$query->select('size', 'unencrypted_size')
-				->from('filecache')
-				->whereParent($id);
-			if ($ignoreUnknown) {
-				$query->andWhere($query->expr()->gte('size', $query->createNamedParameter(0)));
-			}
+			if ($path === 'files') {
+				$query = $this->connection->executeQuery('
+					WITH RECURSIVE FileHierarchy AS (
+						SELECT fileid, size, unencrypted_size, parent, mimetype, 1 as ref_count
+						FROM oc_filecache
+						WHERE fileid = ?
+			
+						UNION ALL
+			
+						SELECT fc.fileid, (fc.size / subquery.ref_count) AS size, (fc.unencrypted_size / subquery.ref_count) AS unencrypted_size, fc.parent, fc.mimetype, subquery.ref_count
+						FROM oc_filecache fc
+						JOIN FileHierarchy fh ON fc.parent = fh.fileid
+						JOIN (
+						SELECT oid, COUNT(oid) AS ref_count
+						FROM oc_filecache
+						WHERE oid IS NOT NULL
+						GROUP BY oc_filecache.oid
+						) AS subquery ON fc.oid = subquery.oid
+					)
+					SELECT * FROM FileHierarchy WHERE mimetype != 2;
+				', [$id]);
 
-			$result = $query->execute();
-			$rows = $result->fetchAll();
-			$result->closeCursor();
+				$rows = $query->fetchAll();
+				$query->closeCursor();
+
+			} else {
+				$query = $this->getQueryBuilder();
+				$query->select('size', 'unencrypted_size')
+					->from('filecache')
+					->whereParent($id);
+				if ($ignoreUnknown) {
+					$query->andWhere($query->expr()->gte('size', $query->createNamedParameter(0)));
+				}
+
+				$result = $query->execute();
+				$rows = $result->fetchAll();
+				$result->closeCursor();
+			}
 
 			if ($rows) {
 				$sizes = array_map(function (array $row) {

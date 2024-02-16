@@ -48,11 +48,14 @@ use OCP\Files\ObjectStore\IObjectStoreMultiPartUpload;
 use OCP\Files\Storage\IChunkedFileWrite;
 use OCP\Files\Storage\IStorage;
 use Psr\Log\LoggerInterface;
+use OCP\DB\QueryBuilder\IQueryBuilder;
+use OCP\IDBConnection;
 
 class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFileWrite {
 	use CopyDirectory;
 
 	protected IObjectStore $objectStore;
+	protected IDBConnection $db;
 	protected string $id;
 	private string $objectPrefix = 'urn:oid:';
 
@@ -85,6 +88,27 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 		$this->handleCopiesAsOwned = (bool)($params['handleCopiesAsOwned'] ?? false);
 
 		$this->logger = \OCP\Server::get(LoggerInterface::class);
+		$this->db = \OC::$server->getDatabaseConnection();
+	}
+
+	public function getETag($path) {
+		$path = $this->normalizePath($path);
+		$stat = $this->stat($path);
+
+		$objectStore = $this->getObjectStore();
+
+		if (isset($stat['oid']) && $objectStore instanceof \OC\Files\ObjectStore\S3) {
+			$urn = $this->getURN($stat['oid']);
+			$etag = $objectStore->getConnection()->headObject([
+				'Bucket' => $objectStore->getBucket(),
+				'Key' => $urn,
+			])->get('ETag');
+			$etag = str_replace('"', '', $etag);
+			
+			return $etag;
+		}
+
+		return parent::getETag($path);
 	}
 
 	public function mkdir($path, bool $force = false) {
@@ -216,12 +240,35 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 	}
 
 	public function rmObject(ICacheEntry $entry): bool {
+		$id = null;
 		try {
-			$this->objectStore->deleteObject($this->getURN($entry->getId()));
+			if ($entry instanceof CacheEntry) {
+				$data = $entry->getData();
+
+				$id = $data['oid'];
+
+				$qb = $this->db->getQueryBuilder();
+				$select = $qb->select($qb->createFunction('COUNT(oid)'))
+					->from('filecache')
+					->where($qb->expr()->eq('oid', $qb->createNamedParameter($id)));
+				
+				$result = $select->execute();
+				$count = $result->fetchOne();
+				$result->closeCursor();
+
+				if ($count !== false) { $count = (int)$count; } else { $count = 0; }
+				//Only delete object if count is less than or equal to one.
+				if ($count <= 1) {
+					$this->objectStore->deleteObject($this->getURN($id));
+				}
+			} else {
+				$id = $entry->getId();
+				$this->objectStore->deleteObject($this->getURN($id));
+			}
 		} catch (\Exception $ex) {
 			if ($ex->getCode() !== 404) {
 				$this->logger->error(
-					'Could not delete object ' . $this->getURN($entry->getId()) . ' for ' . $entry->getPath(),
+					'Could not delete object ' . $this->getURN($id) . ' for ' . $entry->getPath(),
 					[
 						'app' => 'objectstore',
 						'exception' => $ex,
@@ -328,7 +375,7 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 					}
 
 					try {
-						$handle = $this->objectStore->readObject($this->getURN($stat['fileid']));
+						$handle = $this->objectStore->readObject($this->getURN($stat['oid']));
 						if ($handle === false) {
 							return false; // keep backward compatibility
 						}
@@ -340,7 +387,7 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 						return $handle;
 					} catch (NotFoundException $e) {
 						$this->logger->error(
-							'Could not get object ' . $this->getURN($stat['fileid']) . ' for file ' . $path,
+							'Could not get object ' . $this->getURN($stat['oid']) . ' for file ' . $path,
 							[
 								'app' => 'objectstore',
 								'exception' => $e,
@@ -349,7 +396,7 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 						throw $e;
 					} catch (\Exception $e) {
 						$this->logger->error(
-							'Could not get object ' . $this->getURN($stat['fileid']) . ' for file ' . $path,
+							'Could not get object ' . $this->getURN($stat['oid']) . ' for file ' . $path,
 							[
 								'app' => 'objectstore',
 								'exception' => $e,
@@ -583,6 +630,9 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 				throw new \Exception("Object not found after writing (urn: $urn, path: $path)", 404);
 			}
 		}
+
+		$stat['etag'] = $this->getETag($path);
+		$this->getCache()->update($fileId, $stat);
 
 		return $size;
 	}
