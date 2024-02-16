@@ -92,22 +92,24 @@ class ObjectStoreStorage extends \OC\Files\Storage\Common implements IChunkedFil
 	}
 
 	public function getETag($path) {
-		if ($path === '') return parent::getETag($path);
-		
-		$path = $this->normalizePath($path);
-		$stat = $this->stat($path);
+		try {
+			$path = $this->normalizePath($path);
+			$stat = $this->stat($path);
 
-		$objectStore = $this->getObjectStore();
+			$objectStore = $this->getObjectStore();
 
-		if ($stat['parent'] != -1 && isset($stat['oid']) && $objectStore instanceof \OC\Files\ObjectStore\S3) {
-			$urn = $this->getURN($stat['oid']);
-			$etag = $objectStore->getConnection()->headObject([
-				'Bucket' => $objectStore->getBucket(),
-				'Key' => $urn,
-			])->get('ETag');
-			$etag = str_replace('"', '', $etag);
-			
-			return $etag;
+			if ($stat['parent'] != -1 && isset($stat['oid']) && $objectStore instanceof \OC\Files\ObjectStore\S3) {
+				$urn = $this->getURN($stat['oid']);
+				$etag = $objectStore->getConnection()->headObject([
+					'Bucket' => $objectStore->getBucket(),
+					'Key' => $urn,
+				])->get('ETag');
+				$etag = str_replace('"', '', $etag);
+				
+				return $etag;
+			}
+		} catch (Exception $e) {
+			$this->logger->error($e->getMessage(), ['exception' => $e]);
 		}
 
 		return parent::getETag($path);
